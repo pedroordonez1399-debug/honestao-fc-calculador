@@ -381,7 +381,42 @@ def main():
     total_jogos = sum(len(c["jogos"]) for c in campeonatos.values())
     print(f"\n✅ Pronto! {len(campeonatos)} campeonatos, {total_jogos} jogos no total.")
     print("   Arquivo: campeonatos_prontos.json")
-    print("   Esse arquivo é servido para TODOS os usuários (zero consulta por usuário).")
+    print("   Enviando para o Netlify...")
+
+    _enviar_netlify()
+
+
+def _enviar_netlify():
+    """Envia o campeonatos_prontos.json para o Netlify automaticamente."""
+    site_id  = os.environ.get("NETLIFY_SITE_ID", "")
+    token    = os.environ.get("NETLIFY_TOKEN", "")
+
+    if not site_id or not token:
+        print("⚠️  NETLIFY_SITE_ID ou NETLIFY_TOKEN não definidos — pulando envio.")
+        return
+
+    try:
+        with open("campeonatos_prontos.json", "rb") as f:
+            conteudo = f.read()
+
+        # Netlify Files API — atualiza só o arquivo de dados, sem mexer no index.html
+        url = f"https://api.netlify.com/api/v1/sites/{site_id}/files/campeonatos_prontos.json"
+        resp = requests.put(
+            url,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/octet-stream",
+            },
+            data=conteudo,
+            timeout=30,
+        )
+        if resp.status_code in (200, 201):
+            print("✅ campeonatos_prontos.json enviado pro Netlify com sucesso!")
+            print("   Site atualizado: https://honestaofc.netlify.app")
+        else:
+            print(f"⚠️  Netlify respondeu {resp.status_code}: {resp.text[:200]}")
+    except Exception as e:
+        print(f"⚠️  Erro ao enviar pro Netlify: {e}")
 
 
 if __name__ == "__main__":
