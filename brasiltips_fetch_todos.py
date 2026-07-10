@@ -401,9 +401,26 @@ def montar_campeonato(app_id, liga):
 
         h2hJogos[slug] = _h2h(casa["id"], fora["id"], casa["name"], fora["name"])
 
+    # Remove duplicatas: mesmo time jogando duas vezes no mesmo dia
+    # (pode acontecer quando a API retorna o mesmo time em competições diferentes)
+    jogos_limpos = []
+    times_por_dia = {}  # {dia: set(times que já aparecem)}
+    for j in jogos:
+        dia = j["day"]
+        if dia not in times_por_dia:
+            times_por_dia[dia] = set()
+        t1 = j["times"].lower()
+        t2 = j["times2"].lower()
+        if t1 in times_por_dia[dia] or t2 in times_por_dia[dia]:
+            print(f"  [DEDUP] Removido jogo duplicado: {j['times']} × {j['times2']} (dia {dia})")
+            continue
+        times_por_dia[dia].add(t1)
+        times_por_dia[dia].add(t2)
+        jogos_limpos.append(j)
+
     return {
         "nome": liga["nome"], "pais": liga["pais"], "flag": liga["flag"], "divisao": liga["divisao"],
-        "jogos": jogos, "historicoTimes": historicoTimes, "h2hJogos": h2hJogos,
+        "jogos": jogos_limpos, "historicoTimes": historicoTimes, "h2hJogos": h2hJogos,
         "historicoJogadores": historicoJogadores, "jogadoresCartao": jogadoresCartao,
         "jogadoresGols": jogadoresGols, "jogadoresChutes": jogadoresChutes,
         "timesJogadores": timesJogadores,
