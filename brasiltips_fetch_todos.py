@@ -432,12 +432,12 @@ def main():
     total_jogos = sum(len(c["jogos"]) for c in campeonatos.values())
     print(f"\n✅ Pronto! {len(campeonatos)} campeonatos, {total_jogos} jogos no total.")
     print("   Arquivo: campeonatos_prontos.json")
-    print("   Enviando para o Netlify...")
+    print("   Enviando para o GitHub Gist...")
 
-    _enviar_netlify()
+    _enviar_gist()
 
 
-def _enviar_netlify():
+def _enviar_gist():
     """Envia o campeonatos_prontos.json para o GitHub Gist automaticamente."""
     gist_id = os.environ.get("GIST_ID", "4d4eff2eeef21711db4e15a4862a43c6")
     token   = os.environ.get("GITHUB_TOKEN", "")
