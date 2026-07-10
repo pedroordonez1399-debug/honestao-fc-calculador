@@ -261,8 +261,48 @@ def _jogadores(league_id, team_id):
 
 
 # ----------------------------------------------------------------------
-# PREVISÕES (a API entrega vitória; os outros modelos são seus de ML)
+# ÁRBITRO — histórico de cartões por jogo
 # ----------------------------------------------------------------------
+_cache_arbitro = {}
+
+def _historico_arbitro(arbitro_nome, league_id):
+    """Busca os últimos jogos do árbitro e calcula a média de cartões por jogo."""
+    if not arbitro_nome:
+        return {"nome": "Não informado", "media_cartoes": 3.8, "jogos": 0}
+    if arbitro_nome in _cache_arbitro:
+        return _cache_arbitro[arbitro_nome]
+
+    # busca jogos do árbitro nessa liga na temporada atual
+    resp = _get("fixtures", {
+        "referee": arbitro_nome,
+        "season": ANO,
+        "league": league_id,
+        "status": "FT",
+    })
+
+    total_cart = 0
+    total_jogos = len(resp)
+    for jogo in resp[:20]:  # últimos 20 jogos pra ter amostra boa
+        fid = jogo["fixture"]["id"]
+        stats = _get("fixtures/statistics", {"fixture": fid})
+        for time_stats in stats:
+            for stat in (time_stats.get("statistics") or []):
+                if stat.get("type") in ("Yellow Cards",) and stat.get("value"):
+                    try:
+                        total_cart += int(stat["value"])
+                    except (TypeError, ValueError):
+                        pass
+
+    media = round(total_cart / max(total_jogos, 1), 2) if total_jogos > 0 else 3.8
+    resultado = {
+        "nome": arbitro_nome,
+        "media_cartoes": media,
+        "jogos": total_jogos,
+    }
+    _cache_arbitro[arbitro_nome] = resultado
+    return resultado
+
+
 def _predicao(fixture_id):
     resp = _get("predictions", {"fixture": fixture_id})
     return resp[0] if resp else {}
@@ -312,6 +352,12 @@ def montar_campeonato(app_id, liga):
         except (TypeError, ValueError):
             p_casa = p_fora = 0.0
 
+        # árbitro do jogo — ajusta previsão de cartões
+        arbitro_nome = (f["fixture"].get("referee") or "").split(",")[0].strip()
+        hist_arb = _historico_arbitro(arbitro_nome, league_id)
+        # fator do árbitro: compara média dele com média geral (3.8 cartões/jogo)
+        fator_arb = round(hist_arb["media_cartoes"] / 3.8, 3) if hist_arb["media_cartoes"] > 0 else 1.0
+
         # garante o histórico dos dois times ANTES de preencher o jogo
         # (as médias reais vêm daí)
         for t in (casa, fora):
@@ -337,13 +383,18 @@ def montar_campeonato(app_id, liga):
         gols_A = round((mA["gols_pro_media"] + mB["gols_con_media"]) / 2, 2)
         gols_B = round((mB["gols_pro_media"] + mA["gols_con_media"]) / 2, 2)
 
+        # Previsão de cartões: média do time × fator do árbitro
+        cart_A = round(mA["cartoes_media"] * fator_arb, 2)
+        cart_B = round(mB["cartoes_media"] * fator_arb, 2)
+
         jogos.append({
             "day": weekday, "id": slug, "times": casa["name"], "times2": fora["name"],
             "hora": data.strftime("%H:%M"),
+            "arbitro": hist_arb["nome"],
             "vitoria": [p_casa, p_fora],
-            # médias reais da API-Football (linha de base honesta enquanto o ML não entra)
-            "cartao":     [mA["cartoes_media"],   mB["cartoes_media"]],
-            "gols":       [gols_A,                gols_B],
+            # médias reais ajustadas pelo árbitro
+            "cartao":     [cart_A, cart_B],
+            "gols":       [gols_A, gols_B],
             "escanteios": [mA["escanteios_media"], mB["escanteios_media"]],
             "chutes":     [mA["chutes_media"],    mB["chutes_media"]],
         })
@@ -387,36 +438,43 @@ def main():
 
 
 def _enviar_netlify():
-    """Envia o campeonatos_prontos.json para o Netlify automaticamente."""
-    site_id  = os.environ.get("NETLIFY_SITE_ID", "")
-    token    = os.environ.get("NETLIFY_TOKEN", "")
+    """Envia o campeonatos_prontos.json para o GitHub Gist automaticamente."""
+    gist_id = os.environ.get("GIST_ID", "4d4eff2eeef21711db4e15a4862a43c6")
+    token   = os.environ.get("GITHUB_TOKEN", "")
 
-    if not site_id or not token:
-        print("⚠️  NETLIFY_SITE_ID ou NETLIFY_TOKEN não definidos — pulando envio.")
+    if not token:
+        print("⚠️  GITHUB_TOKEN não definido — pulando envio.")
         return
 
     try:
-        with open("campeonatos_prontos.json", "rb") as f:
+        with open("campeonatos_prontos.json", "r", encoding="utf-8") as f:
             conteudo = f.read()
 
-        # Netlify Files API — atualiza só o arquivo de dados, sem mexer no index.html
-        url = f"https://api.netlify.com/api/v1/sites/{site_id}/files/campeonatos_prontos.json"
-        resp = requests.put(
-            url,
+        resp = requests.patch(
+            f"https://api.github.com/gists/{gist_id}",
             headers={
                 "Authorization": f"Bearer {token}",
-                "Content-Type": "application/octet-stream",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
             },
-            data=conteudo,
+            json={
+                "files": {
+                    "campeonatos_prontos.json": {
+                        "content": conteudo
+                    }
+                }
+            },
             timeout=30,
         )
-        if resp.status_code in (200, 201):
-            print("✅ campeonatos_prontos.json enviado pro Netlify com sucesso!")
-            print("   Site atualizado: https://honestaofc.netlify.app")
+
+        if resp.status_code == 200:
+            print("✅ campeonatos_prontos.json enviado pro GitHub Gist com sucesso!")
+            print("   Dados disponíveis em: https://gist.githubusercontent.com/pedroordonez1399-debug/4d4eff2eeef21711db4e15a4862a43c6/raw/campeonatos_prontos.json")
         else:
-            print(f"⚠️  Netlify respondeu {resp.status_code}: {resp.text[:200]}")
+            print(f"⚠️  GitHub respondeu {resp.status_code}: {resp.text[:300]}")
+
     except Exception as e:
-        print(f"⚠️  Erro ao enviar pro Netlify: {e}")
+        print(f"⚠️  Erro ao enviar pro Gist: {e}")
 
 
 if __name__ == "__main__":
